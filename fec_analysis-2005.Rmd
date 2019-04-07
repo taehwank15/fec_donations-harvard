@@ -1,0 +1,297 @@
+---
+title: "FEC Analysis 2005"
+author: "Taehwan Kim"
+date: "3/4/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, cache = TRUE)
+library(fs)
+library(gt)
+library(scales)
+library(lubridate)
+library(forcats)
+library(tidyverse)
+library(stringr)
+
+# Downloads necessary file
+download.file(url ="https://www.fec.gov/files/bulk-downloads/2006/weball06.zip",
+              destfile = "weball06.zip")
+
+# Reads in file with new variable names
+candidate <- read_delim(file ="weball06.zip",
+                         delim = "|",
+                         col_names = c("cand_id",
+                                       "cand_name",
+                                       "cand_ici",
+                                       "pty_cd",
+                                       "cand_pty_affiliation",
+                                       "ttl_receipts",
+                                       "trans_from_auth",
+                                       "ttl_disb",
+                                       "trans_to_auth",
+                                       "coh_bop",
+                                       "coh_cop",
+                                       "cand_contrib",
+                                       "cand_loans",
+                                       "other_loans",
+                                       "cand_loan_repay",
+                                       "other_loan_repay",
+                                       "debts_owed_by",
+                                       "ttl_indiv_contrib",
+                                       "cand_office_st",
+                                       "cand_office_district",
+                                       "spec_election",
+                                       "prim_election",
+                                       "run_election",
+                                       "gen_election",
+                                       "gen_election_precent",
+                                       "other_pol_cmte_contrib",
+                                       "pol_pty_contrib",
+                                       "cg_end_dt",
+                                       "indiv_refunds",
+                                       "cmte_refunds"), guess_max = 10000)
+
+# Deletes downloaded file
+fs::file_delete("weball06.zip")
+
+```
+
+```{r cache = TRUE}
+
+# Selects and names only necessary variables
+candidates <- candidate %>% 
+  mutate(party = cand_pty_affiliation) %>% 
+  mutate(cash = coh_cop) %>% 
+  mutate(cand_state = cand_office_st) %>% 
+  select(cand_id, cand_name, party, cash, cand_state)
+
+# Cast cash as numeric variable
+candidates$cash <- as.numeric(candidates$cash)
+
+# Data of states by candidate count
+num_rows <- candidates %>% 
+  group_by(cand_state) %>% 
+  summarize(count = n()) %>% 
+  arrange(desc(count))
+
+
+# Data of candidates by length of full name
+names <- candidates %>% 
+  select(cand_name) %>% 
+  mutate(len = str_length(cand_name)) %>% 
+  arrange(desc(len)) %>% 
+  separate(cand_name, into = c("last", "first"), sep = ", ")
+
+# Data of lengths of last name
+last_names <- names %>% 
+  mutate(len = str_length(last)) %>% 
+  arrange(desc(len)) 
+
+# Concatenate first and last names
+fifth <- paste(names$first[5], names$last[5])
+longest_last <- paste(names$first[1], names$last[1])
+
+# Change case of name
+fifth <- tools::toTitleCase(tolower(fifth))
+longest_last<- tools::toTitleCase(tolower(longest_last))
+
+```
+
+# Question 1
+
+The state with the 3rd most rows is `r num_rows [3,1]`
+
+The candidate with the 5th longest full name is `r fifth`.
+
+The candidate with the longest last name is `r longest_last`.
+
+# Question 2
+
+``` {r}
+
+# Select and find cash holdings by party
+party_cash <- candidates %>% 
+  select(party, cash) %>% 
+  group_by(party = toupper(party)) %>% 
+  summarize(total_cash = sum(cash)) %>% 
+  arrange(desc(total_cash)) %>% 
+  mutate(total_cash = dollar(total_cash, accuracy = .01)) %>% 
+  mutate(party = fct_recode(toupper(party),
+                            "Democrat" = "DEM",
+                            "Republican" = "REP",
+                            "Independent" = "IND",
+                            "Democratic–Farmer–Labor" = "DFL",
+                            "Libertarian" = "LIB")) %>% 
+  head(5) %>% 
+  ungroup()
+
+# Graph using GT 
+party_cash %>% 
+  gt() %>% 
+  tab_header(title = "Parties with the Largest Aggregate Cash Holdings",
+             subtitle = "Taken at End of 2005-2006 Period") %>% 
+  tab_source_note(source_note = "From FEC.gov") %>% 
+  cols_label(party = "Party",
+             total_cash = "Holdings")
+
+```
+
+# Question 3
+
+``` {r include = FALSE}
+download.file(url = "https://www.fec.gov/files/bulk-downloads/2006/cm06.zip",
+              destfile = "committee.zip")
+
+# Read in master committee data
+committee <- read_delim(file = "committee.zip",
+                        delim = "|",
+                        col_names = c("cmte_id",
+                                      "cmte_nm",
+                                      "tres_nm",
+                                      "cmte_st1",
+                                      "cmte_st2",
+                                      "cmte_city",
+                                      "cmte_st",
+                                      "cmte_zip",
+                                      "cmte_dsgn",
+                                      "cmte_tp",
+                                      "cmte_pty",
+                                      "cmte_filing_freq",
+                                      "org_tp",
+                                      "connected_org_nm",
+                                      "cand_id"),
+                        guess_max = 1000)
+
+
+fs::file_delete("committee.zip")
+
+```
+
+```{r}
+
+# Organize committee data into respective categories
+cm_cand <- candidate %>% 
+  inner_join(committee, by = 'cand_id') %>% 
+  select(cand_id, cmte_id, cmte_pty) %>% 
+  filter(!is.na(cmte_pty)) %>% 
+  mutate(cmte_pty = fct_collapse(cmte_pty,
+                                 Democrat = c("Dem", "dem", "DEM", "d"),
+                                 Republican = c("REP", "rep", "Rep", "R"),
+                                 Other = c("CON", "CST", "DFL", "UNK", "IND", "LIB", "GRE", "PAF", "NNE",
+                                           "FRE", "REF", "NPA", "OTH")))
+
+# Create table based on committee data 
+cm_cand %>% 
+  group_by(cmte_pty) %>% 
+  summarise(total = n()) %>% 
+  arrange(desc(total)) %>% 
+  gt() %>% 
+  tab_header(title = "Parties of Committees with Active Candidates",
+             subtitle = "Taken at End of 2005-2006 Period") %>% 
+  tab_source_note(source_note = "From FEC.gov") %>% 
+  cols_label("cmte_pty" = "Party of Committee",
+             "total" = "Number of Committees")
+
+```
+
+# Question 4
+
+```{r include = FALSE}
+download.file(url = "https://www.fec.gov/files/bulk-downloads/2006/indiv06.zip",
+              destfile = "indiv.zip")
+
+# Read in Indidvidual data
+individual <- read_delim(file = "indiv.zip",
+                         delim = "|",
+                         guess_max = 2000000,
+                         col_names = c("cmte_id",
+                                       "amndt_ind",
+                                       "rpt_tp",
+                                       "transaction_pgi",
+                                       "image_num",
+                                       "trans_tp",
+                                       "ent_tp",
+                                       "name",
+                                       "city",
+                                       "state",
+                                       "zip_code",
+                                       "employer",
+                                       "occupation",
+                                       "transaction_dt",
+                                       "transaction_amt",
+                                       "other_id",
+                                       'tran_id',
+                                       "file_num",
+                                       "memo_cd",
+                                       "memo_text",
+                                       "sub_id"),
+                         escape_double = TRUE)
+
+# Delete indiv.zip file
+fs::file_delete("indiv.zip")
+```
+
+
+
+```{r}
+
+# Tidy data to organize Harvard professor donations by party
+indiv_cm <- individual %>% 
+  left_join(committee, by = "cmte_id") %>% 
+  left_join(candidate, by = "cand_id") %>% 
+  select(cand_id, cand_pty_affiliation, name, employer, occupation, transaction_amt, transaction_dt) %>% 
+  mutate(transaction_dt = parse_datetime(transaction_dt, "%m%d%Y")) %>%
+  filter(!is.na(cand_pty_affiliation)) %>% 
+  mutate(cand_pty_affiliation = fct_recode(cand_pty_affiliation,
+                                           "Democrat" = "DEM",
+                                           "Republican" = "REP",
+                                           "Other" = "UNK")) %>%  
+  filter(transaction_amt > 0) %>% 
+  filter(employer == "HARVARD UNIVERSITY") %>% 
+  filter(str_detect(occupation, fixed("PROFESSOR"))) %>% 
+  mutate(transaction_dt = cut(transaction_dt, breaks = "quarter")) %>% 
+  group_by(transaction_dt, cand_pty_affiliation) %>% 
+  summarize(total = n()) %>% 
+  spread(key = cand_pty_affiliation, value = total) %>% 
+  mutate(Other = 0) %>% 
+  ungroup()
+
+# Create gt table based on indiv_cm
+indiv_cm %>% 
+  gt() %>% 
+  tab_header(title = "Number of Donations from Harvard Professors by Party",
+             subtitle = "Taken from End of 2005-2006 Period") %>%
+  tab_footnote(footnote = "Only found Democrats and Republicans after tidying",
+               locations = cells_column_labels("Other")) %>% 
+  tab_source_note(source_note = "Taken from FEC.gov") %>% 
+  fmt_missing(columns =  "Republican", missing_text = "0") %>% 
+  cols_label(transaction_dt = "Transaction Date")
+
+```
+
+# Question 5
+
+```{r include = FALSE}   
+
+# Save data for question 5
+indiv_rds <-
+  individual %>% 
+  left_join(committee, by = "cmte_id") %>% 
+  left_join(candidate, by = "cand_id") %>% 
+  select(cand_id, cand_pty_affiliation, name, employer, occupation, transaction_amt, transaction_dt) %>% 
+  mutate(transaction_dt = parse_datetime(transaction_dt, "%m%d%Y")) %>%
+  filter(employer == "HARVARD UNIVERSITY") %>%  
+  mutate(cand_pty_affiliation = fct_explicit_na(cand_pty_affiliation, na_level = "Other")) %>% 
+  mutate(cand_pty_affiliation = fct_recode(cand_pty_affiliation,
+                                           "Democrat" = "DEM",
+                                           "Republican" = "REP",
+                                           "Other" = "IND")) %>%  
+  mutate(transaction_dt = cut(transaction_dt, breaks = "quarter")) %>% 
+  mutate(transaction_dt = as.Date(transaction_dt, format = "%Y-%m-%d")) %>%
+  write_rds("saved.rds")
+
+```
+
+[RPubs](http://rpubs.com/taehwank15/473902)

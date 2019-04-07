@@ -1,0 +1,46 @@
+---
+title: "Candidate Graphic"
+author: "Taehwan Kim"
+date: "3/6/2019"
+output: html_document
+---
+
+```{r include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(fs)
+library(scales)
+library(forcats)
+library(tidyverse)
+```
+
+``` {r echo = FALSE}
+# Read in rds
+rds <- read_rds("saved.rds") %>% 
+  group_by(cand_pty_affiliation, transaction_dt) %>% 
+  summarise(total = sum(transaction_amt)) %>% 
+  ungroup() %>% 
+  
+  # Cumulative donation count
+  mutate(cum_total = ave(total, cand_pty_affiliation, FUN = cumsum))
+
+# Create plot
+rds %>% 
+  ggplot(aes(x = transaction_dt, y = cum_total, color = cand_pty_affiliation)) +
+  geom_line() +
+  geom_point() +
+  
+  # Label plot
+  labs(title = "Cumulative Donations by Harvard Employees By Party",
+       subtitle = "Based on End of 2005-2006 Period",
+       caption = "Taken from FEC.gov") +
+  xlab("Quarter of Donation") +
+  ylab("Total Donation in Dollars") +
+  scale_y_continuous(labels = dollar) +
+  
+  # Modify legend
+  scale_color_manual(name = "x", 
+                       values = c("Democrat" = "blue", "Republican" = "red", "Other" = "green"),
+                       breaks = c("Democrat", "Republican", "Other")) 
+  
+```
+
